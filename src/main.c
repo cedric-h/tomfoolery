@@ -47,7 +47,7 @@ static const Vertex vertices[3] =
     { {   0.f,  0.6f }, { 0.f, 0.f, 1.f } }
 };
 
-static const char* vertex_shader_text =
+static const char *vertex_shader_text =
 "#version 100\n"
 "precision mediump float;\n"
 "uniform mat4 MVP;\n"
@@ -60,7 +60,7 @@ static const char* vertex_shader_text =
 "    color = vCol;\n"
 "}\n";
 
-static const char* fragment_shader_text =
+static const char *fragment_shader_text =
 "#version 100\n"
 "precision mediump float;\n"
 "varying vec3 color;\n"
@@ -69,12 +69,12 @@ static const char* fragment_shader_text =
 "    gl_FragColor = vec4(color, 1.0);\n"
 "}\n";
 
-static void error_callback(int error, const char* description)
+static void error_callback(int error, const char *description)
 {
     fprintf(stderr, "GLFW Error: %s\n", description);
 }
 
-static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
+static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
 {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
@@ -92,7 +92,7 @@ int main(void)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
     glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);
 
-    GLFWwindow* window = glfwCreateWindow(640, 480, "OpenGL ES 2.0 Triangle (EGL)", NULL, NULL);
+    GLFWwindow *window = glfwCreateWindow(640, 480, "OpenGL ES 2.0 Triangle (EGL)", NULL, NULL);
     if (!window)
     {
         glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_NATIVE_CONTEXT_API);
