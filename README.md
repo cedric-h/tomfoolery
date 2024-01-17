@@ -1,21 +1,23 @@
 # to run
 
+"bs" stands for "build scripts"
+
 ## loonix
 install cmake, make etc.
 ```
-./build_scripts/linux_install.sh
-./build_scripts/linux_build.sh
+./bs/linux_install.sh
+./bs/linux_build.sh
 ```
 
 ## MackOhEss
 ```
-./build_scripts/macos_install.sh
-./build_scripts/macos_build.sh
+./bs/macos_install.sh
+./bs/macos_build.sh
 ```
 
 ## Windoze
 contribute a working .sln and i will <3 u 4evah
 ```
-./build_scripts/windows_bat.sh
-./build_scripts/windows_bat.sh
+./bs/windows_bat.sh
+./bs/windows_bat.sh
 ```
