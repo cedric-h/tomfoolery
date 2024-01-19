@@ -3,62 +3,295 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include "linmath.h"
-
 #include <stdlib.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <math.h>
 
-typedef struct Vertex {
-    vec2 pos;
-    vec3 col;
-} Vertex;
+#if 0
+#include <stdbool.h>
+#else
+#undef bool
+typedef unsigned char bool;
+#endif
 
-static const Vertex vertices[3] = {
-    { { -0.6f, -0.4f }, { 1.f, 0.f, 0.f } },
-    { {  0.6f, -0.4f }, { 0.f, 1.f, 0.f } },
-    { {   0.f,  0.6f }, { 0.f, 0.f, 1.f } }
-};
+/* static double lerp(double v0, double v1, double t) { return v0 + t * (v1 - v0); } */
+/* static double inv_lerp(double min, double max, double p) { return (p - min) / (max - min); } */
 
-static const char *vertex_shader_text =
-"#version 100\n"
-"precision mediump float;\n"
-"uniform mat4 MVP;\n"
-"attribute vec3 vCol;\n"
-"attribute vec2 vPos;\n"
-"varying vec3 color;\n"
-"void main()\n"
-"{\n"
-"    gl_Position = MVP * vec4(vPos, 0.0, 1.0);\n"
-"    color = vCol;\n"
-"}\n";
+/* static float lerpf(float v0, float v1, float t) { return v0 + t * (v1 - v0); } */
+/* static float inv_lerpf(float min, float max, float p) { return (p - min) / (max - min); } */
+void norm2(float *x, float *y) {
+    float len;
+    if (*x == 0 && *y == 0)return;
 
-static const char *fragment_shader_text =
-"#version 100\n"
-"precision mediump float;\n"
-"varying vec3 color;\n"
-"void main()\n"
-"{\n"
-"    gl_FragColor = vec4(color, 1.0);\n"
-"}\n";
+    len = sqrtf(*x**x + *y**y);
+    *x /= len;
+    *y /= len;
+}
+
+
+/* PLATFORM { */
 
 static void error_callback(int error, const char *description) {
     fprintf(stderr, "GLFW Error: %s\n", description);
 }
 
+static struct {
+    uint8_t keysdown[GLFW_KEY_LAST + 1];
+} input = {0};
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
         glfwSetWindowShouldClose(window, GLFW_TRUE);
+
+    /* "not release" sounds like a double negative, but GLFW_REPEAT ... */
+    input.keysdown[key] = !(action == GLFW_RELEASE);
 }
 
+/* } PLATFORM */
+
+
+
+/* GRAPHIX { */
+
+static GLuint glayout_vertex_pos;
+static GLuint glayout_vertex_col;
+typedef struct Vertex {
+    struct { float x; float y;          } pos;
+    struct { float r; float g; float b; } col;
+} Vertex;
+
+static const char *vertex_shader_text =
+"#version 100\n"
+"precision mediump float;\n"
+"uniform mat4 u_mvp;\n"
+"attribute vec3 v_col;\n"
+"attribute vec2 v_pos;\n"
+"varying vec3 a_col;\n"
+"void main()\n"
+"{\n"
+"    gl_Position = u_mvp * vec4(v_pos, 0.0, 1.0);\n"
+"    a_col = v_col;\n"
+"}\n";
+
+static const char *fragment_shader_text =
+"#version 100\n"
+"precision mediump float;\n"
+"varying vec3 a_col;\n"
+"void main()\n"
+"{\n"
+"    gl_FragColor = vec4(a_col, 1.0);\n"
+"}\n";
+
+typedef struct {
+    uint32_t vbuf_count, ibuf_count;
+    struct { GLuint vbuf, ibuf; } gpu;
+    struct {
+        Vertex *vbuf;
+        uint16_t *ibuf;
+        uint32_t ibuf_i, vbuf_i;
+    } cpu;
+} Geo;
+
+static void geo_gl_bind(Geo *geo) {
+    glBindBuffer(GL_ARRAY_BUFFER, geo->gpu.vbuf);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geo->gpu.ibuf);
+}
+
+static void geo_alloc(Geo *geo, uint32_t vbuf_count, uint32_t ibuf_count) {
+    size_t vbuf_size = sizeof(Vertex)   * (size_t)vbuf_count;
+    size_t ibuf_size = sizeof(uint16_t) * (size_t)ibuf_count;
+
+    geo->vbuf_count = vbuf_count;
+    geo->ibuf_count = ibuf_count;
+
+    geo->cpu.vbuf = malloc(vbuf_size);
+    geo->cpu.ibuf = malloc(ibuf_size);
+
+    glGenBuffers(1, &geo->gpu.vbuf);
+    glGenBuffers(1, &geo->gpu.ibuf);
+
+    geo_gl_bind(geo);
+
+    glBufferData(GL_ARRAY_BUFFER, vbuf_size, NULL, GL_STREAM_DRAW);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, ibuf_size, NULL, GL_STREAM_DRAW);
+}
+
+static void geo_gl_vertex_layout(Geo *geo) {
+    glEnableVertexAttribArray(glayout_vertex_pos);
+    glEnableVertexAttribArray(glayout_vertex_col);
+    glVertexAttribPointer(glayout_vertex_pos, 2, GL_FLOAT, GL_FALSE,
+                          sizeof(Vertex), (void*) offsetof(Vertex, pos));
+    glVertexAttribPointer(glayout_vertex_col, 3, GL_FLOAT, GL_FALSE,
+                          sizeof(Vertex), (void*) offsetof(Vertex, col));
+}
+
+static void geo_gl_upload(Geo *geo) {
+    size_t vbuf_size = sizeof(Vertex)   * (size_t)geo->vbuf_count;
+    size_t ibuf_size = sizeof(uint16_t) * (size_t)geo->ibuf_count;
+
+    geo_gl_bind(geo);
+
+    glBufferSubData(GL_ARRAY_BUFFER, 0, vbuf_size, geo->cpu.vbuf);
+    glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, ibuf_size, geo->cpu.ibuf);
+}
+
+static void geo_clear(Geo *geo) {
+    geo->cpu.vbuf_i = 0;
+    geo->cpu.ibuf_i = 0;
+}
+
+static void geo_box(Geo *geo, float x, float y, float w, float h) {
+    uint16_t start_i = geo->cpu.vbuf_i;
+
+    Vertex br, bl, tl, tr;
+    br.pos.x = x + w/2, br.pos.y = y - h/2, br.col.r = 1.0f, br.col.g = 0.0f, br.col.b = 0.0f;
+    bl.pos.x = x - w/2, bl.pos.y = y - h/2, bl.col.r = 1.0f, bl.col.g = 0.0f, bl.col.b = 0.0f;
+    tl.pos.x = x - w/2, tl.pos.y = y + h/2, tl.col.r = 1.0f, tl.col.g = 0.0f, tl.col.b = 0.0f;
+    tr.pos.x = x + w/2, tr.pos.y = y + h/2, tr.col.r = 1.0f, tr.col.g = 0.0f, tr.col.b = 0.0f;
+
+    geo->cpu.vbuf[geo->cpu.vbuf_i++] = br;
+    geo->cpu.vbuf[geo->cpu.vbuf_i++] = bl;
+    geo->cpu.vbuf[geo->cpu.vbuf_i++] = tl;
+    geo->cpu.vbuf[geo->cpu.vbuf_i++] = tr;
+
+    geo->cpu.ibuf[geo->cpu.ibuf_i++] = 0 + start_i;
+    geo->cpu.ibuf[geo->cpu.ibuf_i++] = 1 + start_i;
+    geo->cpu.ibuf[geo->cpu.ibuf_i++] = 2 + start_i;
+    geo->cpu.ibuf[geo->cpu.ibuf_i++] = 3 + start_i;
+    geo->cpu.ibuf[geo->cpu.ibuf_i++] = 2 + start_i;
+    geo->cpu.ibuf[geo->cpu.ibuf_i++] = 0 + start_i;
+}
+
+/* } GRAPHIX */
+
+
+
+/* SIMULATION { */
+
+typedef unsigned int Ticks;
+
+#define FRAME_SECS (1.0 / 120.0)
+#define ACTOR_MOVE_TICKS_TO_MAX  ((int)floorf(1.0f / FRAME_SECS))
+#define ACTOR_STOP_TICKS_TO_ZERO ((int)floorf(1.0f / FRAME_SECS))
+
+typedef struct {
+    double dt;
+    Ticks ticks;
+
+    struct {
+        float x; float vx;
+        float y; float vy;
+    } actor;
+
+    struct { float x; float old_x;
+             float y; float old_y; } cam;
+} Sim;
+
+void sim_init(Sim *sim) {
+    sim->cam.x = -(sim->actor.x = 0.0f);
+    sim->cam.y = -(sim->actor.y = 0.0f);
+
+    /* ticks == 0 is special */
+    sim->ticks = 1;
+}
+
+void sim_step(Sim *sim, double dt) {
+    /* avoid stepping more than 3 frames at once */
+    dt = fmin(dt, FRAME_SECS * 3.0);
+
+    sim->dt += dt;
+
+    while (sim->dt >= FRAME_SECS) {
+        sim->dt -= FRAME_SECS;
+        sim->ticks += 1;
+
+        /* actor movement */
+        {
+            float dx = 0;
+            float dy = 0;
+            bool moving;
+
+            if (input.keysdown[GLFW_KEY_W]) dy += 1.0f;
+            if (input.keysdown[GLFW_KEY_S]) dy -= 1.0f;
+            if (input.keysdown[GLFW_KEY_A]) dx -= 1.0f;
+            if (input.keysdown[GLFW_KEY_D]) dx += 1.0f;
+
+            moving = (dx != 0) || (dy != 0);
+            if (moving) norm2(&dx, &dy);
+
+            {
+                float speed = sqrtf(sim->actor.vx*sim->actor.vx + sim->actor.vy*sim->actor.vy);
+                float dir_x = sim->actor.vx + dx*0.008f;
+                float dir_y = sim->actor.vy + dy*0.008f;
+                norm2(&dir_x, &dir_y);
+
+                {
+                    float ideal_speed = moving ? (FRAME_SECS * 5.0f) : 0.0f;
+                    /* break speed delta apart into sign and magnitude */
+                    float delta_mag = fabsf(speed - ideal_speed);
+                    float delta_sign = ((speed - ideal_speed) < 0) ? 1 : -1;
+                    float speed_step = FRAME_SECS * (moving ? 0.07f : 0.15f);
+
+                    if (delta_mag < speed_step) {
+                        speed = ideal_speed;
+                    } else {
+                        speed += speed_step * delta_sign;
+                    }
+                }
+
+                sim->actor.vx = dir_x * speed;
+                sim->actor.vy = dir_y * speed;
+
+                sim->actor.x += sim->actor.vx;
+                sim->actor.y += sim->actor.vy;
+            }
+        }
+
+        /* camera */
+        {
+            float ideal_cam_x = -sim->actor.x;
+            float ideal_cam_y = -sim->actor.y;
+
+            float dx = ideal_cam_x - sim->cam.x;
+            float dy = ideal_cam_y - sim->cam.y;
+
+            if (dx != 0 || dy != 0) {
+                float len = 0;
+                len = sqrtf(dx*dx + dy*dy);
+                dx /= len;
+                dy /= len;
+
+                /* move camera slower if we're already close */
+                {
+                    float t;
+                    t = len * FRAME_SECS * 250.0f;
+
+                    dx *= t * 0.01f;
+                    dy *= t * 0.01f;
+                }
+
+                sim->cam.x += dx;
+                sim->cam.y += dy;
+            }
+        }
+    }
+}
+
+/* } SIMULATION */
+
+
+
 int main(void) {
+    GLFWwindow *window;
+    GLint program, mvp_location;
+    Geo geo = {0};
+    Sim sim = {0};
+
     glfwSetErrorCallback(error_callback);
 
     if (!glfwInit())
         exit(EXIT_FAILURE);
 
-    glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
     glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 2);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
@@ -66,10 +299,10 @@ int main(void) {
     glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);
 #endif
 
-    GLFWwindow *window = glfwCreateWindow(640, 480, "OpenGL ES 2.0 Triangle (EGL)", NULL, NULL);
+    window = glfwCreateWindow(640, 480, "tomfoolery", NULL, NULL);
     if (!window) {
         glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_NATIVE_CONTEXT_API);
-        window = glfwCreateWindow(640, 480, "OpenGL ES 2.0 Triangle", NULL, NULL);
+        window = glfwCreateWindow(640, 480, "tomfoolery", NULL, NULL);
         if (!window) {
             glfwTerminate();
             exit(EXIT_FAILURE);
@@ -82,49 +315,99 @@ int main(void) {
     gladLoadGLES2(glfwGetProcAddress);
     glfwSwapInterval(1);
 
-    GLuint vertex_buffer;
-    glGenBuffers(1, &vertex_buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, vertex_buffer);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
+    /* compile shaders, extract attribute locations */
+    {
+        const GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+        const GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
 
-    const GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vertex_shader, 1, &vertex_shader_text, NULL);
+        glShaderSource(vertex_shader, 1, &vertex_shader_text, NULL);
+        glShaderSource(fragment_shader, 1, &fragment_shader_text, NULL);
 
-    const GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(fragment_shader, 1, &fragment_shader_text, NULL);
+        program = glCreateProgram();
+        glCompileShader(vertex_shader);
+        glCompileShader(fragment_shader);
+        glAttachShader(program, vertex_shader);
+        glAttachShader(program, fragment_shader);
+        glLinkProgram(program);
 
-    const GLuint program = glCreateProgram();
-    glCompileShader(vertex_shader);
-    glCompileShader(fragment_shader);
-    glAttachShader(program, vertex_shader);
-    glAttachShader(program, fragment_shader);
-    glLinkProgram(program);
+        mvp_location = glGetUniformLocation(program, "u_mvp");
+        glayout_vertex_pos = glGetAttribLocation(program, "v_pos");
+        glayout_vertex_col = glGetAttribLocation(program, "v_col");
+    }
 
-    const GLint mvp_location = glGetUniformLocation(program, "MVP");
-    const GLint vpos_location = glGetAttribLocation(program, "vPos");
-    const GLint vcol_location = glGetAttribLocation(program, "vCol");
+    /* allocate dynamic, per-frame geometry buffer */
+    geo_alloc(&geo, 1 << 8, 1 << 12);
+    sim_init(&sim);
 
-    glEnableVertexAttribArray(vpos_location);
-    glEnableVertexAttribArray(vcol_location);
-    glVertexAttribPointer(vpos_location, 2, GL_FLOAT, GL_FALSE,
-                          sizeof(Vertex), (void*) offsetof(Vertex, pos));
-    glVertexAttribPointer(vcol_location, 3, GL_FLOAT, GL_FALSE,
-                          sizeof(Vertex), (void*) offsetof(Vertex, col));
-
+    glfwSetTime(0);
     while (!glfwWindowShouldClose(window)) {
+        float mvp[4][4];
+        float ratio;
         int width, height;
-        glfwGetFramebufferSize(window, &width, &height);
-        const float ratio = width / (float) height;
+        {
+            glfwGetFramebufferSize(window, &width, &height);
+            ratio = width / (float) height;
+        }
+
+        sim_step(&sim, glfwGetTime());
+        glfwSetTime(0);
 
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(0.16, 0.12, 0.10, 1);
 
-        mat4x4 mvp;
-        mat4x4_ortho(mvp, -ratio, ratio, -1.f, 1.f, 1.f, -1.f);
+        /* generate dynamic frame geometry */
+        {
+            geo_clear(&geo);
+            geo_box(&geo, sim.actor.x, sim.actor.y, 1.0f, 1.0f);
 
-        glUseProgram(program);
-        glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) &mvp);
-        glDrawArrays(GL_TRIANGLES, 0, 3);
+            {
+                int i;
+                for (i = 0; i < 20; i++) {
+                    float r = ((float)i / 20.0f) * 3.14159f * 2.0f;
+                    float x = cosf(r) * i;
+                    float y = sinf(r) * i;
+                    geo_box(&geo, x, y, 0.1f, 0.1f);
+                }
+            }
+
+            geo_gl_upload(&geo);
+        }
+
+        /* prepare to draw dynamic geometry */
+        {
+            glUseProgram(program);
+            geo_gl_vertex_layout(&geo);
+        }
+
+        /* prepre mvp */
+        {
+            float zoom = 10.0f/2.0f; /* 10 units on screen */
+            float l = -ratio*zoom - sim.cam.x;
+            float r =  ratio*zoom - sim.cam.x;
+            float b =  -1.0f*zoom - sim.cam.y;
+            float t =   1.0f*zoom - sim.cam.y;
+            float n =   1.0f;
+            float f =  -1.0f;
+
+            mvp[0][0] = 2.f/(r-l);
+            mvp[0][1] = mvp[0][2] = mvp[0][3] = 0.f;
+
+            mvp[1][1] = 2.f/(t-b);
+            mvp[1][0] = mvp[1][2] = mvp[1][3] = 0.f;
+
+            mvp[2][2] = -2.f/(f-n);
+            mvp[2][0] = mvp[2][1] = mvp[2][3] = 0.f;
+
+            mvp[3][0] = -(r+l)/(r-l);
+            mvp[3][1] = -(t+b)/(t-b);
+            mvp[3][2] = -(f+n)/(f-n);
+            mvp[3][3] = 1.f;
+
+            glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) &mvp);
+        }
+
+        glDrawElements(GL_TRIANGLES, geo.cpu.ibuf_i, GL_UNSIGNED_SHORT, 0);
 
         glfwSwapBuffers(window);
         glfwPollEvents();
@@ -135,4 +418,3 @@ int main(void) {
     glfwTerminate();
     exit(EXIT_SUCCESS);
 }
-
