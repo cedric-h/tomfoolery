@@ -16,9 +16,20 @@ typedef unsigned char bool;
 #endif
 
 typedef uint32_t Color;
-#define COLOR_ACTOR  0xff0000ff
-#define COLOR_WOOD   0xff00ff00
-#define COLOR_PLANK  0xffff0000
+#if 1
+#define COLOR_0 0xf4debefful
+#define COLOR_1 0xbfa082fful
+#define COLOR_2 0x4d675afful
+#define COLOR_3 0x847b45fful
+#define COLOR_4 0xf5aa5ffful
+#define COLOR_5 0xc79773fful
+#else
+#define COLOR_0 0xf9f7f1fful
+#define COLOR_1 0xf6dbbcfful
+#define COLOR_2 0xcaede3fful
+#define COLOR_3 0xd3b94ffful
+#define COLOR_4 0xb78763fful
+#endif
 
 /* static double lerp(double v0, double v1, double t) { return v0 + t * (v1 - v0); } */
 /* static double inv_lerp(double min, double max, double p) { return (p - min) / (max - min); } */
@@ -35,6 +46,57 @@ void norm2(float *x, float *y) {
 }
 #define COUNT(ARR) ((sizeof(ARR) / sizeof(ARR[0])))
 
+static void mat4x4_invert(float t[4][4], float m[4][4]) {
+    float idet;
+    float s[6];
+    float c[6];
+
+    s[0] = m[0][0]*m[1][1] - m[1][0]*m[0][1];
+    s[1] = m[0][0]*m[1][2] - m[1][0]*m[0][2];
+    s[2] = m[0][0]*m[1][3] - m[1][0]*m[0][3];
+    s[3] = m[0][1]*m[1][2] - m[1][1]*m[0][2];
+    s[4] = m[0][1]*m[1][3] - m[1][1]*m[0][3];
+    s[5] = m[0][2]*m[1][3] - m[1][2]*m[0][3];
+
+    c[0] = m[2][0]*m[3][1] - m[3][0]*m[2][1];
+    c[1] = m[2][0]*m[3][2] - m[3][0]*m[2][2];
+    c[2] = m[2][0]*m[3][3] - m[3][0]*m[2][3];
+    c[3] = m[2][1]*m[3][2] - m[3][1]*m[2][2];
+    c[4] = m[2][1]*m[3][3] - m[3][1]*m[2][3];
+    c[5] = m[2][2]*m[3][3] - m[3][2]*m[2][3];
+    
+    /* assumes it is invertible */
+    idet = 1.0f/( s[0]*c[5]-s[1]*c[4]+s[2]*c[3]+s[3]*c[2]-s[4]*c[1]+s[5]*c[0] );
+    
+    t[0][0] = ( m[1][1] * c[5] - m[1][2] * c[4] + m[1][3] * c[3]) * idet;
+    t[0][1] = (-m[0][1] * c[5] + m[0][2] * c[4] - m[0][3] * c[3]) * idet;
+    t[0][2] = ( m[3][1] * s[5] - m[3][2] * s[4] + m[3][3] * s[3]) * idet;
+    t[0][3] = (-m[2][1] * s[5] + m[2][2] * s[4] - m[2][3] * s[3]) * idet;
+
+    t[1][0] = (-m[1][0] * c[5] + m[1][2] * c[2] - m[1][3] * c[1]) * idet;
+    t[1][1] = ( m[0][0] * c[5] - m[0][2] * c[2] + m[0][3] * c[1]) * idet;
+    t[1][2] = (-m[3][0] * s[5] + m[3][2] * s[2] - m[3][3] * s[1]) * idet;
+    t[1][3] = ( m[2][0] * s[5] - m[2][2] * s[2] + m[2][3] * s[1]) * idet;
+
+    t[2][0] = ( m[1][0] * c[4] - m[1][1] * c[2] + m[1][3] * c[0]) * idet;
+    t[2][1] = (-m[0][0] * c[4] + m[0][1] * c[2] - m[0][3] * c[0]) * idet;
+    t[2][2] = ( m[3][0] * s[4] - m[3][1] * s[2] + m[3][3] * s[0]) * idet;
+    t[2][3] = (-m[2][0] * s[4] + m[2][1] * s[2] - m[2][3] * s[0]) * idet;
+
+    t[3][0] = (-m[1][0] * c[3] + m[1][1] * c[1] - m[1][2] * c[0]) * idet;
+    t[3][1] = ( m[0][0] * c[3] - m[0][1] * c[1] + m[0][2] * c[0]) * idet;
+    t[3][2] = (-m[3][0] * s[3] + m[3][1] * s[1] - m[3][2] * s[0]) * idet;
+    t[3][3] = ( m[2][0] * s[3] - m[2][1] * s[1] + m[2][2] * s[0]) * idet;
+}
+static void mat4x4_mul_vec4(float r[4], float m[4][4], const float v[4]) {
+    int i, j;
+    for(j=0; j<4; ++j) {
+        r[j] = 0.f;
+        for(i=0; i<4; ++i)
+            r[j] += m[i][j] * v[i];
+    }
+}
+
 
 /* PLATFORM { */
 
@@ -43,6 +105,9 @@ static void error_callback(int error, const char *description) {
 }
 
 static struct {
+    float mvp[4][4];
+
+    struct { float x; float y; } cursor; /* in world space, converted with mvp */
     uint8_t keysdown[GLFW_KEY_LAST + 1];
 } input = {0};
 static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods) {
@@ -51,6 +116,15 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 
     /* "not release" sounds like a double negative, but GLFW_REPEAT ... */
     input.keysdown[key] = !(action == GLFW_RELEASE);
+}
+static void cursor_position_callback(GLFWwindow *window, double xpos, double ypos) {
+    float v[4] = {0};
+    v[0] = xpos;
+    v[1] = ypos;
+    v[2] = 0;
+    v[3] = 1;
+
+    mat4x4_mul_vec4(v, input.mvp, v);
 }
 
 /* } PLATFORM */
@@ -62,7 +136,7 @@ static void key_callback(GLFWwindow *window, int key, int scancode, int action, 
 static GLuint glayout_vertex_pos;
 static GLuint glayout_vertex_col;
 typedef struct Vertex {
-    struct { float x; float y;          } pos;
+    struct { float x; float y; float z; } pos;
     Color rgba;
 } Vertex;
 
@@ -79,13 +153,30 @@ static const char *vertex_shader_text =
 "    a_col = v_col;\n"
 "}\n";
 
+/* #define SRGB */
 static const char *fragment_shader_text =
 "#version 100\n"
 "precision mediump float;\n"
+#ifdef SRGB
+    "// Converts a color from linear light gamma to sRGB gamma\n"
+    "vec4 fromLinear(vec4 linearRGB)\n"
+    "{\n"
+    "    bvec3 cutoff = lessThan(linearRGB.rgb, vec3(0.0031308));\n"
+    "    vec3 higher = vec3(1.055)*pow(linearRGB.rgb, vec3(1.0/2.4)) - vec3(0.055);\n"
+    "    vec3 lower = linearRGB.rgb * vec3(12.92);\n"
+    "\n"
+    "    return vec4(mix(higher, lower, vec3(cutoff)), linearRGB.a);\n"
+    "}\n"
+#endif 
+"\n"
 "varying vec4 a_col;\n"
+"\n"
 "void main()\n"
 "{\n"
-"    gl_FragColor = a_col;\n"
+"    gl_FragColor = vec4(a_col.a, a_col.b, a_col.g, a_col.r);\n"
+#ifdef SRGB
+"    gl_FragColor = fromLinear(gl_FragColor);\n"
+#endif
 "}\n";
 
 typedef struct {
@@ -125,9 +216,9 @@ static void geo_alloc(Geo *geo, uint32_t vbuf_count, uint32_t ibuf_count) {
 static void geo_gl_vertex_layout(Geo *geo) {
     glEnableVertexAttribArray(glayout_vertex_pos);
     glEnableVertexAttribArray(glayout_vertex_col);
-    glVertexAttribPointer(glayout_vertex_pos, 2, GL_FLOAT, GL_FALSE,
+    glVertexAttribPointer(glayout_vertex_pos, 3, GL_FLOAT, GL_FALSE,
                           sizeof(Vertex), (void*) offsetof(Vertex, pos));
-    glVertexAttribPointer(glayout_vertex_col, 4, GL_UNSIGNED_BYTE, GL_FALSE,
+    glVertexAttribPointer(glayout_vertex_col, 4, GL_UNSIGNED_BYTE, GL_TRUE,
                           sizeof(Vertex), (void*) offsetof(Vertex, rgba));
 }
 
@@ -359,6 +450,7 @@ int main(void) {
     }
 
     glfwSetKeyCallback(window, key_callback);
+    glfwSetCursorPosCallback(window, cursor_position_callback);
 
     glfwMakeContextCurrent(window);
     gladLoadGLES2(glfwGetProcAddress);
@@ -366,8 +458,12 @@ int main(void) {
 
     /* compile shaders, extract attribute locations */
     {
-        const GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
-        const GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+        GLint shader_ok;
+        GLsizei log_length;
+        char info_log[8192];
+
+        GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+        GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
 
         glShaderSource(vertex_shader, 1, &vertex_shader_text, NULL);
         glShaderSource(fragment_shader, 1, &fragment_shader_text, NULL);
@@ -378,6 +474,26 @@ int main(void) {
         glAttachShader(program, vertex_shader);
         glAttachShader(program, fragment_shader);
         glLinkProgram(program);
+
+        glGetShaderiv(vertex_shader, GL_COMPILE_STATUS, &shader_ok);
+        if (shader_ok != GL_TRUE)
+        {
+            fprintf(stderr, "ERROR: failed to compile vertex shader\n");
+            glGetShaderInfoLog(vertex_shader, 8192, &log_length,info_log);
+            fprintf(stderr, "ERROR: \n%s\n\n", info_log);
+            glDeleteShader(vertex_shader);
+            return 1;
+        }
+
+        glGetShaderiv(fragment_shader, GL_COMPILE_STATUS, &shader_ok);
+        if (shader_ok != GL_TRUE)
+        {
+            fprintf(stderr, "ERROR: Failed to compile fragment shader\n");
+            glGetShaderInfoLog(fragment_shader, 8192, &log_length, info_log);
+            fprintf(stderr, "ERROR: \n%s\n\n", info_log);
+            glDeleteShader(fragment_shader);
+            return 1;
+        }
 
         mvp_location = glGetUniformLocation(program, "u_mvp");
         glayout_vertex_pos = glGetAttribLocation(program, "v_pos");
@@ -390,7 +506,7 @@ int main(void) {
 
     glfwSetTime(0);
     while (!glfwWindowShouldClose(window)) {
-        float mvp[4][4];
+        float mvp[4][4] = {0};
         float ratio;
         int width, height;
         {
@@ -403,12 +519,31 @@ int main(void) {
 
         glViewport(0, 0, width, height);
         glClear(GL_COLOR_BUFFER_BIT);
-        glClearColor(0.16, 0.12, 0.10, 1);
+        glClearColor(
+            (float)(((0xfful << 24) & COLOR_0) >> 24) / 255.0f,
+            (float)(((0xfful << 16) & COLOR_0) >> 16) / 255.0f,
+            (float)(((0xfful << 8 ) & COLOR_0) >> 8 ) / 255.0f,
+            1.0f
+        );
 
         /* generate dynamic frame geometry */
         {
             geo_clear(&geo);
-            geo_box(&geo, sim.actor.x, sim.actor.y, 1.0f, 1.0f, COLOR_ACTOR);
+#if 0
+            /* color swatches */
+            geo_box(&geo, sim.actor.x+1, sim.actor.y+1, 1.0f, 1.0f, COLOR_1);
+            geo_box(&geo, sim.actor.x+2, sim.actor.y+2, 1.0f, 1.0f, COLOR_2);
+            geo_box(&geo, sim.actor.x+3, sim.actor.y+3, 1.0f, 1.0f, COLOR_3);
+            geo_box(&geo, sim.actor.x+4, sim.actor.y+4, 1.0f, 1.0f, COLOR_4);
+
+            geo_circ(&geo, sim.actor.x-1, sim.actor.y-1, 0.5f, COLOR_1);
+            geo_circ(&geo, sim.actor.x-2, sim.actor.y-2, 0.5f, COLOR_2);
+            geo_circ(&geo, sim.actor.x-3, sim.actor.y-3, 0.5f, COLOR_3);
+            geo_circ(&geo, sim.actor.x-4, sim.actor.y-4, 0.5f, COLOR_4);
+#else
+            geo_box(&geo, sim.actor.x, sim.actor.y, 1.0f, 1.0f, COLOR_2);
+            geo_box(&geo, input.cursor.x, input.cursor.y, 0.1f, 0.1f, COLOR_2);
+
 
             {
                 int i;
@@ -416,9 +551,10 @@ int main(void) {
                     float r = ((float)i / 25.0f) * 3.14159f * 2.0f;
                     float x = cosf(r) * 5.0f;
                     float y = sinf(r) * 5.0f;
-                    geo_circ(&geo, x, y, 0.6f, COLOR_WOOD);
+                    geo_circ(&geo, x, y, 0.6f, COLOR_5);
                 }
             }
+#endif
 
             geo_gl_upload(&geo);
         }
@@ -452,6 +588,12 @@ int main(void) {
             mvp[3][1] = -(t+b)/(t-b);
             mvp[3][2] = -(f+n)/(f-n);
             mvp[3][3] = 1.f;
+
+            {
+                float tmp[4][4] = {0};
+                memcpy(tmp, mvp, sizeof(mvp));
+                mat4x4_invert(input.mvp, tmp);
+            }
 
             glUniformMatrix4fv(mvp_location, 1, GL_FALSE, (const GLfloat*) &mvp);
         }

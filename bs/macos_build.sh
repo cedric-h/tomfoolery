@@ -1,5 +1,5 @@
 cd build
-cc -o bloom -ansi -Wall -pedantic -Werror \
+cc -o bloom -ansi -Wall -pedantic -Werror -Wno-overlength-strings \
    -fsanitize=address,undefined -g \
    ../src/main.c glfw_build/src/libglfw3.a \
    -Iglfw/deps -Iglfw/include \
