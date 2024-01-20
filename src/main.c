@@ -620,7 +620,7 @@ int main(void) {
     glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_EGL_CONTEXT_API);
 #endif
 
-    window = glfwCreateWindow(640, 480, "tomfoolery", NULL, NULL);
+    window = glfwCreateWindow(640, 480, "tomfoolery (EGL)", NULL, NULL);
     if (!window) {
         glfwWindowHint(GLFW_CONTEXT_CREATION_API, GLFW_NATIVE_CONTEXT_API);
         window = glfwCreateWindow(640, 480, "tomfoolery", NULL, NULL);
