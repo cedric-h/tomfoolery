@@ -12,4 +12,4 @@ cp "${chrome_versions[0]}/Libraries/libGLESv2.dylib" libGLESv2.dylib
 
 cd ..
 
-./macos_build.sh
+./bs/macos_build.sh
